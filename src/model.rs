@@ -1,7 +1,6 @@
-use diesel::{PgConnection, Queryable, Selectable};
 use crate::schema::todos::dsl::todos;
-use crate::schema::todos::title;
 use diesel::prelude::*;
+use diesel::{PgConnection, Queryable, Selectable};
 use serde::Serialize;
 /*impl Todo12 {
     pub fn new(title: String, status: Status) -> Self {
@@ -27,7 +26,6 @@ impl TodosToPersist {
     pub fn load(connection: &mut PgConnection) -> Vec<Self> {
 
         let results = todos
-            .limit(5)
             .select(TodosToPersist::as_select())
             .load(connection)
             .expect("Error loading posts .");

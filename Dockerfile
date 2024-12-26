@@ -37,8 +37,7 @@ WORKDIR /app
 COPY --from=builder /app/target/release/todos .
 # ADD .github/docker/run.sh /app/docker_entrypoint.sh
 
-EXPOSE 3000 
-EXPOSE 4000
+EXPOSE 3000
 
 # Set the command to run on container start
 ENTRYPOINT ["./todos"]

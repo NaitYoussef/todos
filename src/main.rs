@@ -6,13 +6,12 @@
 mod model;
 mod schema;
 
+use crate::model::TodosToPersist;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use diesel::Connection;
 use diesel::PgConnection;
-use std::env;
-use crate::model::TodosToPersist;
 
 #[tokio::main]
 async fn main() {
@@ -21,7 +20,7 @@ async fn main() {
         .unwrap_or_else(|_| panic!("Error connecting to {}", database_url));
     // build our application with a route
     let app = Router::new()
-        .route("/", get(handler2))
+        .route("/", get(fetchAll))
         .route("/", post(handler));
     // run it
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
@@ -32,10 +31,10 @@ async fn main() {
 }
 
 async fn handler(title: String) -> StatusCode {
-
     StatusCode::CREATED
 }
-async fn handler2() -> Json<Vec<TodosToPersist>> {
+
+async fn fetchAll() -> Json<Vec<TodosToPersist>> {
     let database_url = "postgres://omc_projet:omc_projet@localhost:5432/todos";
     let mut connection = PgConnection::establish(&database_url)
         .unwrap_or_else(|_| panic!("Error connecting  to {}", database_url));
