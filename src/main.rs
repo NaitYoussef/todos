@@ -4,42 +4,53 @@
    Ecrire lire de la base
 */
 mod model;
-mod schema;
+
+use sqlx::postgres::PgPoolOptions;
 
 use axum::http::StatusCode;
 use axum::routing::{get, post};
-use axum::{Json, Router};
-use diesel::Connection;
-use diesel::PgConnection;
-use std::env;
-use crate::model::TodosToPersist;
+use axum::{Json, Router, debug_handler};
+use axum::extract::State;
+use sqlx::{query, Executor, Pool, Postgres};
+use crate::model::Todo;
+
+#[derive(Clone)]
+struct AppState {
+    pool: Pool<Postgres>,
+}
 
 #[tokio::main]
 async fn main() {
     let database_url = "postgres://omc_projet:omc_projet@localhost:5432/todos";
-    PgConnection::establish(&database_url)
-        .unwrap_or_else(|_| panic!("Error connecting to {}", database_url));
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(database_url).await.unwrap();
     // build our application with a route
+
+    let state = AppState { pool };
     let app = Router::new()
         .route("/", get(handler2))
-        .route("/", post(handler));
+        .route("/", post(handler))
+        .with_state(state);
     // run it
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
     println!("listening on {}", listener.local_addr().unwrap());
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app).await.unwrap()
 }
 
 async fn handler(title: String) -> StatusCode {
 
     StatusCode::CREATED
 }
-async fn handler2() -> Json<Vec<TodosToPersist>> {
-    let database_url = "postgres://omc_projet:omc_projet@localhost:5432/todos";
-    let mut connection = PgConnection::establish(&database_url)
-        .unwrap_or_else(|_| panic!("Error connecting  to {}", database_url));
+#[debug_handler]
+async fn handler2(State(state): State<AppState>) -> Json<Vec<Todo>> {
+    let query = query!(r#"SELECT status, title, id FROM todos WHERE id = $1"#, 1)
+        .fetch_one(&state.pool)
+        .await.unwrap();
 
-    let vec = TodosToPersist::load(&mut connection);
-    Json(vec)
+    let todo = Todo::new(query.title, query.status);
+
+    Json(vec![todo])
 }
