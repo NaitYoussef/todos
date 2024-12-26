@@ -23,7 +23,8 @@ struct AppState {
 async fn main() {
     let database_url = "postgres://omc_projet:omc_projet@localhost:5432/todos";
     let pool = PgPoolOptions::new()
-        .max_connections(5)
+        .min_connections(30)
+        .max_connections(50)
         .connect(database_url).await.unwrap();
     // build our application with a route
 
