@@ -7,12 +7,12 @@ mod model;
 
 use sqlx::postgres::PgPoolOptions;
 
+use crate::model::Todo;
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
-use axum::{Json, Router, debug_handler};
-use axum::extract::State;
-use sqlx::{query, Executor, Pool, Postgres};
-use crate::model::Todo;
+use axum::{debug_handler, Json, Router};
+use sqlx::{Executor, Pool, Postgres};
 
 #[derive(Clone)]
 struct AppState {
@@ -23,14 +23,16 @@ struct AppState {
 async fn main() {
     let database_url = "postgres://omc_projet:omc_projet@localhost:5432/todos";
     let pool = PgPoolOptions::new()
-        .min_connections(30)
+        .min_connections(50)
         .max_connections(50)
-        .connect(database_url).await.unwrap();
+        .connect(database_url)
+        .await
+        .unwrap();
     // build our application with a route
 
     let state = AppState { pool };
     let app = Router::new()
-        .route("/", get(handler2))
+        .route("/", get(fetch))
         .route("/", post(handler))
         .with_state(state);
     // run it
@@ -42,16 +44,9 @@ async fn main() {
 }
 
 async fn handler(title: String) -> StatusCode {
-
     StatusCode::CREATED
 }
 #[debug_handler]
-async fn handler2(State(state): State<AppState>) -> Json<Vec<Todo>> {
-    let query = query!(r#"SELECT status, title, id FROM todos WHERE id = $1"#, 1)
-        .fetch_one(&state.pool)
-        .await.unwrap();
-
-    let todo = Todo::new(query.title, query.status);
-
-    Json(vec![todo])
+async fn fetch(State(state): State<AppState>) -> Json<Vec<Todo>> {
+    Json(Todo::load(&state.pool).await)
 }
