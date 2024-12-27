@@ -10,6 +10,7 @@ pub struct Todo12 {
 }*/
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Pool, Postgres};
+use tracing::info;
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct TodosToPersist {
@@ -31,6 +32,7 @@ impl TodosToPersist {
     }
 
     pub async fn create_new(pool: Pool<Postgres>, title: String) {
+        info!("creating new todos with title {}", title = title);
         let mut transaction = pool.begin().await.unwrap();
         let result = sqlx::query!(r#"INSERT INTO todos (title, status) VALUES ($1, $2)"#, title, "PENDING")
             .execute(&mut *transaction).await.unwrap();

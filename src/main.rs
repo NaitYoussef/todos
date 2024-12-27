@@ -13,6 +13,8 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
+use tracing::instrument;
+use tracing_subscriber::fmt::format::FmtSpan;
 
 #[derive(Clone)]
 struct AppState {
@@ -26,6 +28,11 @@ struct TodoRequest {
 
 #[tokio::main]
 async fn main() {
+
+    tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::CLOSE)
+        .init();
+
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect("postgres://omc_projet:omc_projet@localhost:5432/todos")
@@ -45,6 +52,7 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
+#[instrument(name = "user_creation", skip(state, title))]
 async fn handler(State(state): State<AppState>, Json(title): Json<TodoRequest>) -> StatusCode {
     TodosToPersist::create_new(state.pool, title.title).await;
     StatusCode::CREATED
