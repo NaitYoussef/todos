@@ -10,12 +10,18 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::Deserialize;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
 
 #[derive(Clone)]
 struct AppState {
     pool: Pool<Postgres>,
+}
+
+#[derive(Deserialize)]
+struct TodoRequest {
+    title: String,
 }
 
 #[tokio::main]
@@ -28,7 +34,7 @@ async fn main() {
     let state = AppState { pool };
     // build our application with a route
     let app = Router::new()
-        .route("/", get(fetchAll))
+        .route("/", get(fetch_all))
         .route("/", post(handler))
         .with_state(state);
     // run it
@@ -39,14 +45,14 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn handler(title: String) -> StatusCode {
+async fn handler(State(state): State<AppState>, Json(title): Json<TodoRequest>) -> StatusCode {
+    TodosToPersist::create_new(state.pool, title.title).await;
     StatusCode::CREATED
 }
 
-async fn fetchAll(State(state): State<AppState>) -> Json<Vec<TodosToPersist>> {
-    let results = sqlx::query!(r#"select * from todos"#)
-        .fetch_all(&state.pool)
-        .await
-        .unwrap();
+async fn fetch_all(State(state): State<AppState>) -> Json<Vec<TodosToPersist>> {
+    let pool = state.pool;
 
+    Json(TodosToPersist::load(pool).await)
 }
+
