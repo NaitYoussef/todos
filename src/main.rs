@@ -4,41 +4,132 @@
    Ecrire lire de la base
 */
 mod model;
-mod schema;
 
-use crate::model::TodosToPersist;
-use axum::http::StatusCode;
+use crate::model::{convert, Todo};
+use axum::body::Bytes;
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::Response;
 use axum::routing::{get, post};
-use axum::{Json, Router};
-use diesel::Connection;
-use diesel::PgConnection;
+use axum::{debug_handler, Json, Router};
+use futures::StreamExt;
+use http_body_util::StreamBody;
+use hyper::body::Frame;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::{query, Pool, Postgres};
+use std::convert::Infallible;
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::SendError;
+use tokio::time::sleep;
+use tokio_stream::wrappers::ReceiverStream;
+
+type Data = Result<Frame<Bytes>, Infallible>;
+type ResponseBody = StreamBody<ReceiverStream<Data>>;
+
+#[derive(Clone)]
+struct AppState {
+    pool: Pool<Postgres>,
+}
 
 #[tokio::main]
 async fn main() {
     let database_url = "postgres://omc_projet:omc_projet@localhost:5432/todos";
-    PgConnection::establish(&database_url)
-        .unwrap_or_else(|_| panic!("Error connecting to {}", database_url));
+    let pool = PgPoolOptions::new()
+        .min_connections(50)
+        .max_connections(50)
+        .connect(database_url)
+        .await
+        .unwrap();
     // build our application with a route
+
+    let state = AppState { pool };
     let app = Router::new()
-        .route("/", get(fetchAll))
-        .route("/", post(handler));
+        .route("/", get(fetch))
+        .route("/todos", get(fetch_stream))
+        .route("/", post(handler))
+        .with_state(state);
     // run it
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
     println!("listening on {}", listener.local_addr().unwrap());
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app).await.unwrap()
 }
 
-async fn handler(title: String) -> StatusCode {
+async fn handler(State(state): State<AppState>, title: String) -> StatusCode {
+    let result = query!(
+        "INSERT INTO todos (title, status) VALUES ($1, $2)",
+        &title,
+        "PENDING"
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    println!("{}", result.rows_affected());
     StatusCode::CREATED
 }
+#[debug_handler]
+async fn fetch(State(state): State<AppState>) -> Json<Vec<Todo>> {
+    Json(Todo::load(&state.pool).await)
+}
 
-async fn fetchAll() -> Json<Vec<TodosToPersist>> {
-    let database_url = "postgres://omc_projet:omc_projet@localhost:5432/todos";
-    let mut connection = PgConnection::establish(&database_url)
-        .unwrap_or_else(|_| panic!("Error connecting  to {}", database_url));
+#[debug_handler]
+async fn fetch_stream(State(state): State<AppState>) -> Result<Response<ResponseBody>, Infallible> {
+    let (tx, rx) = mpsc::channel::<Data>(2000);
 
-    let vec = TodosToPersist::load(&mut connection);
-    Json(vec)
+    // some async task
+    tokio::spawn(async move {
+        // some expensive operations
+
+        // let steam = Todo::load_stream(state.pool.clone()).await;
+        let mut stream = query!(r#"SELECT status, title, id FROM todos order by id"#)
+            .fetch(&state.pool)
+            // .with_capacity(1000)
+            .map(|row| match row {
+                Ok(todo) => Ok(Todo::new(todo.title, todo.status)),
+                Err(_) => Err("error)"),
+            });
+
+        let mut i = 0;
+        let mut vec = Vec::with_capacity(10);
+
+        while let Some(message) = stream.next().await {
+            let x = message.unwrap();
+            vec.push(x);
+
+
+            i = i + 1;
+            if i % 100 == 0 {
+                println!("iteration {i}");
+                match tx.send(Ok(Frame::data(convert(&vec)))).await {
+                    Ok(_) => {}
+                    Err(err) => {
+                        eprintln!("{}", err)
+                    }
+                }
+                vec.clear();
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+
+        println!("{}", i);
+
+        // headers based off expensive operation
+        /*        let mut headers = HeaderMap::new();
+                headers.append("content-type", "application/jsonlines".parse().unwrap());
+                tx.send(Ok(Frame::trailers(headers))).await.unwrap();
+        */
+    });
+
+    let stream = ReceiverStream::new(rx);
+    let body = StreamBody::new(stream);
+
+    println!("fin");
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/jsonlines") // trailers must be declared
+        .body(body)
+        .unwrap())
 }
