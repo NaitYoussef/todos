@@ -6,13 +6,24 @@
 mod model;
 
 use sqlx::postgres::PgPoolOptions;
+use std::convert::Infallible;
 
 use crate::model::Todo;
+use axum::body::{Body, Bytes};
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{debug_handler, Json, Router};
-use sqlx::{Executor, Pool, Postgres};
+use http_body_util::{BodyExt, StreamBody};
+use hyper::body::Frame;
+use sqlx::{query, Executor, Pool, Postgres};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use futures::StreamExt;
+
+type Data = Result<Frame<Bytes>, Infallible>;
+type ResponseBody = StreamBody<ReceiverStream<Data>>;
 
 #[derive(Clone)]
 struct AppState {
@@ -33,6 +44,7 @@ async fn main() {
     let state = AppState { pool };
     let app = Router::new()
         .route("/", get(fetch))
+        .route("/todos", get(fetch_stream))
         .route("/", post(handler))
         .with_state(state);
     // run it
@@ -49,4 +61,41 @@ async fn handler(title: String) -> StatusCode {
 #[debug_handler]
 async fn fetch(State(state): State<AppState>) -> Json<Vec<Todo>> {
     Json(Todo::load(&state.pool).await)
+}
+
+#[debug_handler]
+async fn fetch_stream(State(state): State<AppState>) -> Result<Response<ResponseBody>, Infallible> {
+    let (tx, rx) = mpsc::channel::<Data>(2);
+
+    // some async task
+    tokio::spawn(async move {
+        // some expensive operations
+
+       // let steam = Todo::load_stream(state.pool.clone()).await;
+        let mut stream = query!(r#"SELECT status, title, id FROM todos"#)
+            .fetch(&state.pool)
+            .map(|row| match row {
+                Ok(todo) => Ok(Todo::new(todo.title, todo.status)),
+                Err(_) => Err("error)"),
+            });
+
+        while let Some(message) = stream.next().await {
+            tx.send(Ok(Frame::data(Bytes::from(message.unwrap()))))
+                .await.unwrap();
+        }
+
+        // headers based off expensive operation
+        let mut headers = HeaderMap::new();
+        tx.send(Ok(Frame::trailers(headers))).await.unwrap();
+    });
+
+    let stream = ReceiverStream::new(rx);
+    let body = StreamBody::new(stream);
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("Trailer", "chunky-trailer") // trailers must be declared
+        .body(body)
+        .unwrap())
+
 }
