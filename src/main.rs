@@ -4,24 +4,33 @@
    Ecrire lire de la base
 */
 mod model;
-mod schema;
 
 use crate::model::TodosToPersist;
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use diesel::Connection;
-use diesel::PgConnection;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::{Pool, Postgres};
+
+#[derive(Clone)]
+struct AppState {
+    pool: Pool<Postgres>,
+}
 
 #[tokio::main]
 async fn main() {
-    let database_url = "postgres://omc_projet:omc_projet@localhost:5432/todos";
-    PgConnection::establish(&database_url)
-        .unwrap_or_else(|_| panic!("Error connecting to {}", database_url));
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect("postgres://omc_projet:omc_projet@localhost:5432/todos")
+        .await
+        .unwrap();
+    let state = AppState { pool };
     // build our application with a route
     let app = Router::new()
         .route("/", get(fetchAll))
-        .route("/", post(handler));
+        .route("/", post(handler))
+        .with_state(state);
     // run it
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
@@ -34,11 +43,10 @@ async fn handler(title: String) -> StatusCode {
     StatusCode::CREATED
 }
 
-async fn fetchAll() -> Json<Vec<TodosToPersist>> {
-    let database_url = "postgres://omc_projet:omc_projet@localhost:5432/todos";
-    let mut connection = PgConnection::establish(&database_url)
-        .unwrap_or_else(|_| panic!("Error connecting  to {}", database_url));
+async fn fetchAll(State(state): State<AppState>) -> Json<Vec<TodosToPersist>> {
+    let results = sqlx::query!(r#"select * from todos"#)
+        .fetch_all(&state.pool)
+        .await
+        .unwrap();
 
-    let vec = TodosToPersist::load(&mut connection);
-    Json(vec)
 }
