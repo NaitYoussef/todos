@@ -1,6 +1,6 @@
 use axum::body::{Body, Bytes};
 use axum::response::{IntoResponse, Sse};
-use futures::stream::{self, StreamExt};
+use futures::stream::{self};
 use serde::Serialize;
 use sqlx::{query, Error, Pool, Postgres};
 use std::iter::Map;
@@ -23,15 +23,16 @@ impl Todo {
             .collect()
     }
 
-/*    pub async fn load_stream(pool: Pool<Postgres>) -> impl Stream {
-        query!(r#"SELECT status, title, id FROM todos"#)
-            .fetch(&pool)
-            .map(|row| match row {
-                Ok(todo) => Ok(Todo::new(todo.title, todo.status)),
-                Err(_) => Err("error)"),
-            })
-    }
-*/}
+    /*    pub async fn load_stream(pool: Pool<Postgres>) -> impl Stream {
+            query!(r#"SELECT status, title, id FROM todos"#)
+                .fetch(&pool)
+                .map(|row| match row {
+                    Ok(todo) => Ok(Todo::new(todo.title, todo.status)),
+                    Err(_) => Err("error)"),
+                })
+        }
+    */
+}
 
 #[derive(Serialize)]
 pub struct Todo {
@@ -47,7 +48,19 @@ pub enum Status {
 
 impl From<Todo> for Bytes {
     fn from(value: Todo) -> Self {
-        let string = serde_json::to_vec(&value).unwrap();
+        let mut string = serde_json::to_vec(&value).unwrap();
+        let mut vec = "\n".to_string().into_bytes();
+        string.append(&mut vec);
         string.into()
     }
+}
+pub fn convert(value: &Vec<Todo>) -> Bytes {
+    let mut result = Vec::new();
+    for todo in value {
+        let mut string = serde_json::to_vec(&todo).unwrap();
+        result.append(&mut string);
+        let mut vec = "\n".to_string().into_bytes();
+        result.append(&mut vec);
+    }
+    result.into()
 }

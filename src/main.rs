@@ -8,19 +8,19 @@ mod model;
 use sqlx::postgres::PgPoolOptions;
 use std::convert::Infallible;
 
-use crate::model::Todo;
-use axum::body::{Body, Bytes};
+use crate::model::{convert, Todo};
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::{Response};
 use axum::routing::{get, post};
 use axum::{debug_handler, Json, Router};
-use http_body_util::{BodyExt, StreamBody};
+use futures::StreamExt;
+use http_body_util::{StreamBody};
 use hyper::body::Frame;
-use sqlx::{query, Executor, Pool, Postgres};
+use sqlx::{query, Pool, Postgres};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use futures::StreamExt;
 
 type Data = Result<Frame<Bytes>, Infallible>;
 type ResponseBody = StreamBody<ReceiverStream<Data>>;
@@ -55,7 +55,10 @@ async fn main() {
     axum::serve(listener, app).await.unwrap()
 }
 
-async fn handler(title: String) -> StatusCode {
+async fn handler(State(state): State<AppState>, title: String) -> StatusCode {
+    let result = query!("INSERT INTO todos (title, status) VALUES ($1, $2)", &title, "PENDING")
+        .execute(&state.pool).await.unwrap();
+    println!("{}", result.rows_affected());
     StatusCode::CREATED
 }
 #[debug_handler]
@@ -65,7 +68,7 @@ async fn fetch(State(state): State<AppState>) -> Json<Vec<Todo>> {
 
 #[debug_handler]
 async fn fetch_stream(State(state): State<AppState>) -> Result<Response<ResponseBody>, Infallible> {
-    let (tx, rx) = mpsc::channel::<Data>(2);
+    let (tx, rx) = mpsc::channel::<Data>(2000);
 
     // some async task
     tokio::spawn(async move {
@@ -79,13 +82,24 @@ async fn fetch_stream(State(state): State<AppState>) -> Result<Response<Response
                 Err(_) => Err("error)"),
             });
 
+        let mut i = 0;
+        let mut vec = Vec::with_capacity(10);
+
         while let Some(message) = stream.next().await {
-            tx.send(Ok(Frame::data(Bytes::from(message.unwrap()))))
-                .await.unwrap();
+            let x = message.unwrap();
+            vec.push(x);
+            if i % 10 == 0 {
+                tx.send(Ok(Frame::data(convert(&vec)))).await.unwrap();
+                vec.clear();
+
+            }
         }
+
+        println!("{}", i);
 
         // headers based off expensive operation
         let mut headers = HeaderMap::new();
+        headers.append("content-type", "application/jsonlines".parse().unwrap());
         tx.send(Ok(Frame::trailers(headers))).await.unwrap();
     });
 
@@ -94,7 +108,7 @@ async fn fetch_stream(State(state): State<AppState>) -> Result<Response<Response
 
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header("Trailer", "chunky-trailer") // trailers must be declared
+        .header("content-type", "application/jsonlines") // trailers must be declared
         .body(body)
         .unwrap())
 
