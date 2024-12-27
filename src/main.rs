@@ -5,21 +5,23 @@
 */
 mod model;
 
-use sqlx::postgres::PgPoolOptions;
-use std::convert::Infallible;
-
 use crate::model::{convert, Todo};
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::{Response};
+use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{debug_handler, Json, Router};
 use futures::StreamExt;
-use http_body_util::{StreamBody};
+use http_body_util::StreamBody;
 use hyper::body::Frame;
+use sqlx::postgres::PgPoolOptions;
 use sqlx::{query, Pool, Postgres};
+use std::convert::Infallible;
+use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::SendError;
+use tokio::time::sleep;
 use tokio_stream::wrappers::ReceiverStream;
 
 type Data = Result<Frame<Bytes>, Infallible>;
@@ -56,8 +58,14 @@ async fn main() {
 }
 
 async fn handler(State(state): State<AppState>, title: String) -> StatusCode {
-    let result = query!("INSERT INTO todos (title, status) VALUES ($1, $2)", &title, "PENDING")
-        .execute(&state.pool).await.unwrap();
+    let result = query!(
+        "INSERT INTO todos (title, status) VALUES ($1, $2)",
+        &title,
+        "PENDING"
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
     println!("{}", result.rows_affected());
     StatusCode::CREATED
 }
@@ -74,9 +82,10 @@ async fn fetch_stream(State(state): State<AppState>) -> Result<Response<Response
     tokio::spawn(async move {
         // some expensive operations
 
-       // let steam = Todo::load_stream(state.pool.clone()).await;
-        let mut stream = query!(r#"SELECT status, title, id FROM todos"#)
+        // let steam = Todo::load_stream(state.pool.clone()).await;
+        let mut stream = query!(r#"SELECT status, title, id FROM todos order by id"#)
             .fetch(&state.pool)
+            // .with_capacity(1000)
             .map(|row| match row {
                 Ok(todo) => Ok(Todo::new(todo.title, todo.status)),
                 Err(_) => Err("error)"),
@@ -88,29 +97,39 @@ async fn fetch_stream(State(state): State<AppState>) -> Result<Response<Response
         while let Some(message) = stream.next().await {
             let x = message.unwrap();
             vec.push(x);
+
+
             i = i + 1;
             if i % 100 == 0 {
-                tx.send(Ok(Frame::data(convert(&vec)))).await.unwrap();
+                println!("iteration {i}");
+                match tx.send(Ok(Frame::data(convert(&vec)))).await {
+                    Ok(_) => {}
+                    Err(err) => {
+                        eprintln!("{}", err)
+                    }
+                }
                 vec.clear();
-
+                tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }
 
         println!("{}", i);
 
         // headers based off expensive operation
-        let mut headers = HeaderMap::new();
-        headers.append("content-type", "application/jsonlines".parse().unwrap());
-        tx.send(Ok(Frame::trailers(headers))).await.unwrap();
+        /*        let mut headers = HeaderMap::new();
+                headers.append("content-type", "application/jsonlines".parse().unwrap());
+                tx.send(Ok(Frame::trailers(headers))).await.unwrap();
+        */
     });
 
     let stream = ReceiverStream::new(rx);
     let body = StreamBody::new(stream);
+
+    println!("fin");
 
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/jsonlines") // trailers must be declared
         .body(body)
         .unwrap())
-
 }
