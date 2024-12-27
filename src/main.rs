@@ -88,7 +88,8 @@ async fn fetch_stream(State(state): State<AppState>) -> Result<Response<Response
         while let Some(message) = stream.next().await {
             let x = message.unwrap();
             vec.push(x);
-            if i % 10 == 0 {
+            i = i + 1;
+            if i % 100 == 0 {
                 tx.send(Ok(Frame::data(convert(&vec)))).await.unwrap();
                 vec.clear();
 
