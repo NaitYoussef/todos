@@ -22,10 +22,14 @@ impl Todo {
     }
 
     pub async fn insert_new_todo(pool: &Pool<Postgres>, title: String) -> Result<(), String> {
-        let _ = query_as!(Todo, r#"INSERT INTO todos (status, title) VALUES ($1, 'PENDING')"#, title)
-            .execute(pool)
-            .await
-            .map_err(|e| e.to_string())?;
+        let _ = query_as!(
+            Todo,
+            r#"INSERT INTO todos (status, title) VALUES ($1, 'PENDING')"#,
+            title
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
         Ok(())
     }

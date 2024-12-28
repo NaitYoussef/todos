@@ -6,20 +6,20 @@
 mod model;
 
 use crate::model::{convert, Todo};
-use axum::body::{Body, Bytes};
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{debug_handler, Json, Router};
 use futures::StreamExt;
 use http_body_util::StreamBody;
 use hyper::body::Frame;
 use hyper::HeaderMap;
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{query, Pool, Postgres};
-use std::convert::Infallible;
 use serde::Deserialize;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::{Pool, Postgres};
+use std::convert::Infallible;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -58,16 +58,18 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
-    println!("listening on 2 {}", listener.local_addr().unwrap());
+    println!("listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap()
 }
 
-async fn create_todos(State(state): State<AppState>, Json(todo_request): Json<TodoRequest>) -> StatusCode {
-    let result = Todo::insert_new_todo(&state.pool, todo_request.title).await;
-    match result {
-        Ok(_) => StatusCode::CREATED,
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
-    }
+async fn create_todos(
+    State(state): State<AppState>,
+    Json(todo_request): Json<TodoRequest>,
+) -> Result<StatusCode, StatusCode> {
+    let _ = Todo::insert_new_todo(&state.pool, todo_request.title)
+        .await
+        .map_err(|e| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::CREATED)
 }
 #[debug_handler]
 async fn fetch(State(state): State<AppState>) -> Json<Vec<Todo>> {
