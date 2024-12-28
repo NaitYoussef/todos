@@ -6,22 +6,21 @@
 mod model;
 
 use crate::model::{convert, Todo};
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::Response;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, post};
 use axum::{debug_handler, Json, Router};
 use futures::StreamExt;
 use http_body_util::StreamBody;
 use hyper::body::Frame;
+use hyper::HeaderMap;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{query, Pool, Postgres};
 use std::convert::Infallible;
-use std::time::Duration;
+use serde::Deserialize;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::error::SendError;
-use tokio::time::sleep;
 use tokio_stream::wrappers::ReceiverStream;
 
 type Data = Result<Frame<Bytes>, Infallible>;
@@ -30,6 +29,11 @@ type ResponseBody = StreamBody<ReceiverStream<Data>>;
 #[derive(Clone)]
 struct AppState {
     pool: Pool<Postgres>,
+}
+
+#[derive(Deserialize)]
+struct TodoRequest {
+    title: String,
 }
 
 #[tokio::main]
@@ -47,27 +51,23 @@ async fn main() {
     let app = Router::new()
         .route("/", get(fetch))
         .route("/todos", get(fetch_stream))
-        .route("/", post(handler))
+        // .route("/stream", get(fetch_stream2))
+        .route("/todos", post(create_todos))
         .with_state(state);
     // run it
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
-    println!("listening on {}", listener.local_addr().unwrap());
+    println!("listening on 2 {}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap()
 }
 
-async fn handler(State(state): State<AppState>, title: String) -> StatusCode {
-    let result = query!(
-        "INSERT INTO todos (title, status) VALUES ($1, $2)",
-        &title,
-        "PENDING"
-    )
-    .execute(&state.pool)
-    .await
-    .unwrap();
-    println!("{}", result.rows_affected());
-    StatusCode::CREATED
+async fn create_todos(State(state): State<AppState>, Json(todo_request): Json<TodoRequest>) -> StatusCode {
+    let result = Todo::insert_new_todo(&state.pool, todo_request.title).await;
+    match result {
+        Ok(_) => StatusCode::CREATED,
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 #[debug_handler]
 async fn fetch(State(state): State<AppState>) -> Json<Vec<Todo>> {
@@ -82,44 +82,35 @@ async fn fetch_stream(State(state): State<AppState>) -> Result<Response<Response
     tokio::spawn(async move {
         // some expensive operations
 
-        // let steam = Todo::load_stream(state.pool.clone()).await;
-        let mut stream = query!(r#"SELECT status, title, id FROM todos order by id"#)
-            .fetch(&state.pool)
-            // .with_capacity(1000)
-            .map(|row| match row {
-                Ok(todo) => Ok(Todo::new(todo.title, todo.status)),
-                Err(_) => Err("error)"),
-            });
-
+        let mut stream = Todo::load_stream(&state.pool).await;
         let mut i = 0;
-        let mut vec = Vec::with_capacity(10);
+        let mut vec = Vec::with_capacity(100);
 
         while let Some(message) = stream.next().await {
             let x = message.unwrap();
             vec.push(x);
 
-
             i = i + 1;
             if i % 100 == 0 {
-                println!("iteration {i}");
                 match tx.send(Ok(Frame::data(convert(&vec)))).await {
                     Ok(_) => {}
                     Err(err) => {
-                        eprintln!("{}", err)
+                        eprintln!("{}", err);
+                        return Ok(());
                     }
                 }
                 vec.clear();
-                tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }
 
         println!("{}", i);
+        tx.send(Ok(Frame::data(convert(&vec)))).await;
 
         // headers based off expensive operation
-        /*        let mut headers = HeaderMap::new();
-                headers.append("content-type", "application/jsonlines".parse().unwrap());
-                tx.send(Ok(Frame::trailers(headers))).await.unwrap();
-        */
+        let mut headers = HeaderMap::new();
+        headers.append("content-type", "application/jsonlines2".parse().unwrap());
+        tx.send(Ok(Frame::trailers(headers))).await.unwrap();
+        Ok::<(), String>(())
     });
 
     let stream = ReceiverStream::new(rx);
@@ -133,3 +124,14 @@ async fn fetch_stream(State(state): State<AppState>) -> Result<Response<Response
         .body(body)
         .unwrap())
 }
+/*#[debug_handler]
+async fn fetch_stream2(State(state): State<AppState>) -> Result<impl IntoResponse, Infallible> {
+
+
+    let body = Sse::new(Todo::load_stream_static(&state.pool).await);
+
+    println!("fin");
+
+    Ok(body)
+}
+*/
