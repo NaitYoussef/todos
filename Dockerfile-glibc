@@ -1,0 +1,7 @@
+FROM gcr.io/distroless/cc-debian12
+
+EXPOSE 3000
+
+COPY target/release/todos /bin/todos
+
+ENTRYPOINT ["/bin/todos"]
