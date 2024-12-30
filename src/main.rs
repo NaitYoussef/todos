@@ -45,8 +45,13 @@ async fn main() {
         .connect(database_url)
         .await
         .unwrap();
-    // build our application with a route
 
+    sqlx::migrate!()
+        .run(&pool)
+        .await
+        .unwrap();
+
+    // build our application with a route
     let state = AppState { pool };
     let app = Router::new()
         .route("/", get(fetch))
@@ -54,10 +59,12 @@ async fn main() {
         // .route("/stream", get(fetch_stream2))
         .route("/todos", post(create_todos))
         .with_state(state);
+
     // run it
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
+
     println!("listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap()
 }
