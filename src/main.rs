@@ -23,6 +23,8 @@ use tokio::task_local;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
 use tracing_subscriber::fmt::format::FmtSpan;
+use std::env;
+use dotenv::dotenv;
 
 type Data = Result<Frame<Bytes>, Infallible>;
 type ResponseBody = StreamBody<ReceiverStream<Data>>;
@@ -48,11 +50,14 @@ async fn main() {
         .with_span_events(FmtSpan::CLOSE)
         .init();
 
-    let database_url = env!("DATABASE_URL");
+    dotenv().ok(); // This line loads the environment variables from the ".env" file.
+
+
+    let database_url = env::var("DATABASE_URL").unwrap();
     let pool = PgPoolOptions::new()
         .min_connections(5)
         .max_connections(5)
-        .connect(database_url)
+        .connect(&database_url)
         .await
         .unwrap();
 
