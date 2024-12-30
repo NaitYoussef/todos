@@ -58,6 +58,21 @@ impl Todo {
     }
 }
 
+#[derive(FromRow)]
+pub struct User {
+    pub login: String,
+    pub password: String,
+}
+
+impl User {
+    pub async fn fetch(pool: &Pool<Postgres>, login: &String) -> Option<User> {
+        query_as!(User, r#"SELECT login, password FROM users WHERE login = $1"#, login)
+            .fetch_one(pool)
+            .await
+            .ok()
+    }
+}
+
 #[derive(Serialize, FromRow)]
 pub struct Todo {
     id: i32,
