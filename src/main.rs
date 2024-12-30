@@ -1,8 +1,3 @@
-/* KATA du jour
-   Ecrire une API pour écrire dans la base
-   Enregister des elements en base de données
-   Ecrire lire de la base
-*/
 mod model;
 
 use crate::model::{convert, Todo, User};
@@ -42,7 +37,7 @@ struct TodoRequest {
 
 #[tokio::main]
 async fn main() {
-    let database_url = "postgres://omc_projet:omc_projet@localhost:5432/todos";
+    let database_url = env!("DATABASE_URL");
     let pool = PgPoolOptions::new()
         .min_connections(5)
         .max_connections(5)
@@ -91,7 +86,11 @@ task_local! {
     pub static USER: String;
 }
 
-async fn auth(State(state): State<AppState>,req: Request, next: Next) -> Result<Response, StatusCode> {
+async fn auth(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
     let auth_header = req
         .headers()
         .get(header::AUTHORIZATION)
@@ -112,7 +111,10 @@ async fn authorize_current_user(pool: &Pool<Postgres>, auth_token: &str) -> Opti
     println!("{}", token);
     if let Ok(decoded) = BASE64_STANDARD.decode(token) {
         let result = String::from_utf8(decoded).unwrap();
-        let tokens = result.split(':').map(|user| user.to_string()).collect::<Vec<String>>();
+        let tokens = result
+            .split(':')
+            .map(|user| user.to_string())
+            .collect::<Vec<String>>();
         let login = tokens.get(0).unwrap().clone();
         let password = tokens.get(1).unwrap().clone();
         println!("login: {}", login);
@@ -120,10 +122,10 @@ async fn authorize_current_user(pool: &Pool<Postgres>, auth_token: &str) -> Opti
         return User::fetch(pool, &login)
             .await
             .filter(|u| u.password == password)
-            .map(|u| u.login)
+            .map(|u| u.login);
     }
 
-    println!("Ops {}",auth_token);
+    println!("Ops {}", auth_token);
     None
 }
 
