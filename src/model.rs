@@ -92,14 +92,31 @@ pub fn convert(value: &Vec<Todo>) -> Bytes {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::rc::Rc;
+    use std::sync::{Arc, Mutex};
     use std::thread;
 
+    #[derive(Debug)]
+    struct Count {
+        count: u32,
+    }
     #[test]
     fn test() {
-        let handle = thread::spawn(|| {
-            println!("Hello, world!");
-        });
-        handle.join().unwrap();
+        let counter = Arc::new(Mutex::new(Count { count: 0 }));
+        let mut handles = vec![];
+        for _ in 0..100 {
+            let mut counterCloned = counter.clone();
+            let handle = thread::spawn(move || {
+                let mut guard = counterCloned.lock().unwrap();
+                guard.count = guard.count + 1;
+                println!("Hello, world! {:?}", guard.count);
+            });
+            handles.push(handle);
+        }
+        handles.into_iter().for_each(|h| h.join().unwrap());
+    }
+
+    fn m1(c: Rc<Count>) {
+        println!("{:?}", Rc::strong_count(&c));
     }
 }
