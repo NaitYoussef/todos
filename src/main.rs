@@ -90,7 +90,6 @@ async fn fetch_stream(State(state): State<AppState>) -> Result<Response<Response
     // some async task
     tokio::spawn(async move {
         // some expensive operations
-
         let mut stream = Todo::load_stream(&state.pool).await;
         let mut i = 0;
         let mut vec = Vec::with_capacity(100);

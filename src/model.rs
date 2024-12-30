@@ -89,3 +89,17 @@ pub fn convert(value: &Vec<Todo>) -> Bytes {
     }
     result.into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+
+    #[test]
+    fn test() {
+        let handle = thread::spawn(|| {
+            println!("Hello, world!");
+        });
+        handle.join().unwrap();
+    }
+}
