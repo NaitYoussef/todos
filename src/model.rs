@@ -91,7 +91,7 @@ impl From<Todo> for Bytes {
         let mut string = serde_json::to_vec(&value).unwrap();
         let mut vec = "\n".to_string().into_bytes();
         string.append(&mut vec);
-        string.into()
+            string.into()
     }
 }
 pub fn convert(value: &Vec<Todo>) -> Bytes {

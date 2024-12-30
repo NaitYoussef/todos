@@ -21,6 +21,8 @@ use std::convert::Infallible;
 use tokio::sync::mpsc;
 use tokio::task_local;
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::info;
+use tracing_subscriber::fmt::format::FmtSpan;
 
 type Data = Result<Frame<Bytes>, Infallible>;
 type ResponseBody = StreamBody<ReceiverStream<Data>>;
@@ -37,6 +39,15 @@ struct TodoRequest {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_line_number(true)
+        .with_file(true)
+        .with_target(false)
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .with_span_events(FmtSpan::CLOSE)
+        .init();
+
     let database_url = env!("DATABASE_URL");
     let pool = PgPoolOptions::new()
         .min_connections(5)
@@ -63,6 +74,7 @@ async fn main() {
         .unwrap();
 
     println!("listening on {}", listener.local_addr().unwrap());
+    info!("listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap()
 }
 
@@ -70,6 +82,11 @@ async fn create_todos(
     State(state): State<AppState>,
     Json(todo_request): Json<TodoRequest>,
 ) -> Result<StatusCode, StatusCode> {
+    info!(
+        message = "creating todo",
+        title = todo_request.title,
+        user = "moi"
+    );
     let _ = Todo::insert_new_todo(&state.pool, todo_request.title)
         .await
         .map_err(|e| StatusCode::INTERNAL_SERVER_ERROR)?;
