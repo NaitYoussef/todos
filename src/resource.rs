@@ -33,7 +33,7 @@ impl ProblemDetail {
     pub fn new(status: StatusCode, detail: String) -> Self {
         ProblemDetail {
             status,
-            title:status.canonical_reason().unwrap().to_string(),
+            title: status.canonical_reason().unwrap().to_string(),
             detail,
         }
     }

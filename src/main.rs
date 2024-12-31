@@ -164,16 +164,25 @@ async fn authorize_current_user(pool: &Pool<Postgres>, auth_token: &str) -> Opti
     None
 }
 
-async fn delete_todo(State(state): State<AppState>, Path(id): Path<i32>) -> Result<(), ProblemDetail> {
+async fn delete_todo(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<(), ProblemDetail> {
     let optionalTodo = TodoDao::load_by_id(&state.pool, id).await;
     if let Some(mut todo) = optionalTodo {
         if !todo.cancel() {
-            return Err(ProblemDetail::new(StatusCode::BAD_REQUEST, String::from("only pending todos can be cancelled")))
+            return Err(ProblemDetail::new(
+                StatusCode::BAD_REQUEST,
+                String::from("only pending todos can be cancelled"),
+            ));
         }
         TodoDao::cancel(todo.id, &state.pool).await;
         return Ok(());
     }
-    Err(ProblemDetail::new(StatusCode::NOT_FOUND, String::from("Not found")))
+    Err(ProblemDetail::new(
+        StatusCode::NOT_FOUND,
+        String::from("Not found"),
+    ))
 }
 
 #[debug_handler]

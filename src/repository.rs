@@ -33,16 +33,16 @@ impl TodoDao {
         .collect()
     }
 
-    pub async fn load_by_id(pool: &Pool<Postgres>, id: i32) -> Option<Todo>{
+    pub async fn load_by_id(pool: &Pool<Postgres>, id: i32) -> Option<Todo> {
         query_as!(
             TodoDao,
             r#"SELECT id, status, title, user_id, created_at FROM todos WHERE id=$1"#,
             id
         )
-            .fetch_one(pool)
-            .await
-            .ok()
-            .map(|todoDao| todoDao.todo())
+        .fetch_one(pool)
+        .await
+        .ok()
+        .map(|todoDao| todoDao.todo())
     }
 
     fn todo(&self) -> Todo {
@@ -71,11 +71,15 @@ impl TodoDao {
     }
 
     pub async fn cancel(id: i32, pool: &Pool<Postgres>) -> Result<(), String> {
-        query!(r#"UPDATE todos SET status=$1 WHERE id=$2"#, Status::Cancelled.to_string(), id)
-            .execute(pool)
-            .await
-            .map_err(|e| e.to_string())
-            .map(|res| info!("Updated : {}", res.rows_affected()))
+        query!(
+            r#"UPDATE todos SET status=$1 WHERE id=$2"#,
+            Status::Cancelled.to_string(),
+            id
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())
+        .map(|res| info!("Updated : {}", res.rows_affected()))
     }
 
     pub async fn load_stream<'a>(
