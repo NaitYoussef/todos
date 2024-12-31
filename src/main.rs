@@ -25,8 +25,11 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
 use std::convert::Infallible;
 use std::env;
+use std::thread::sleep;
+use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::task_local;
+use tokio::{signal, task_local};
+use tokio::time::sleep_until;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -84,7 +87,10 @@ async fn main() {
 
     println!("listening on {}", listener.local_addr().unwrap());
     info!("listening on {}", listener.local_addr().unwrap());
-    axum::serve(listener, app).await.unwrap()
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap()
 }
 
 async fn create_todos(
@@ -109,6 +115,7 @@ async fn create_todos(
 #[debug_handler]
 async fn fetch(State(state): State<AppState>) -> Json<Vec<TodoResourceV1>> {
     println!("je suis {}", USER.get().login);
+    tokio::time::sleep(Duration::from_secs(25)).await;
     Json(
         TodoDao::load(&state.pool)
             .await
@@ -234,6 +241,24 @@ async fn fetch_stream(State(state): State<AppState>) -> Result<Response<Response
         .header("content-type", "application/jsonlines") // trailers must be declared
         .body(body)
         .unwrap())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    tokio::select! {_ = ctrl_c => {println!("received ctrl + C")}}
 }
 /*#[debug_handler]
 async fn fetch_stream2(State(state): State<AppState>) -> Result<impl IntoResponse, Infallible> {
