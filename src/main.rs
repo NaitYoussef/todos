@@ -4,19 +4,19 @@ mod resource;
 
 use crate::model::{Todo, User};
 use crate::repository::{convert, TodoDao, UserDao};
-use crate::resource::TodoResourceV1;
+use crate::resource::{ProblemDetail, TodoResourceV1};
 use axum::body::Bytes;
-use axum::extract::{Request, State};
+use axum::extract::{Path, Request, State};
 use axum::http::{header, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{debug_handler, middleware, Json, Router};
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use dotenv::dotenv;
 use futures::future::err;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use http_body_util::StreamBody;
 use hyper::body::Frame;
 use hyper::HeaderMap;
@@ -72,7 +72,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(fetch))
         .route("/todos", get(fetch_stream))
-        // .route("/stream", get(fetch_stream2))
+        .route("/todos/:id", delete(delete_todo))
         .route("/todos", post(create_todos))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth))
         .with_state(state);
@@ -90,7 +90,7 @@ async fn main() {
 async fn create_todos(
     State(state): State<AppState>,
     Json(todo_request): Json<TodoRequest>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, ProblemDetail> {
     let user = USER.get();
     info!(
         message = "creating todo",
@@ -101,7 +101,7 @@ async fn create_todos(
         .await
         .map_err(|e| {
             error!("Error caught {:?}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR;
+            ProblemDetail::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         })?;
     Ok(StatusCode::CREATED)
 }
@@ -109,7 +109,13 @@ async fn create_todos(
 #[debug_handler]
 async fn fetch(State(state): State<AppState>) -> Json<Vec<TodoResourceV1>> {
     println!("je suis {}", USER.get().login);
-    Json(TodoDao::load(&state.pool).await.into_iter().map(|todo| TodoResourceV1::from(todo)).collect())
+    Json(
+        TodoDao::load(&state.pool)
+            .await
+            .into_iter()
+            .map(|todo| TodoResourceV1::from(todo))
+            .collect(),
+    )
 }
 
 task_local! {
@@ -151,11 +157,23 @@ async fn authorize_current_user(pool: &Pool<Postgres>, auth_token: &str) -> Opti
         println!("password: {}", password);
         return UserDao::fetch(pool, &login)
             .await
-            .filter(|u| u.password == password)
+            .filter(|u| u.password == password);
     }
 
     println!("Ops {}", auth_token);
     None
+}
+
+async fn delete_todo(State(state): State<AppState>, Path(id): Path<i32>) -> Result<(), ProblemDetail> {
+    let optionalTodo = TodoDao::load_by_id(&state.pool, id).await;
+    if let Some(mut todo) = optionalTodo {
+        if !todo.cancel() {
+            return Err(ProblemDetail::new(StatusCode::BAD_REQUEST, String::from("only pending todos can be cancelled")))
+        }
+        TodoDao::cancel(todo.id, &state.pool).await;
+        return Ok(());
+    }
+    Err(ProblemDetail::new(StatusCode::NOT_FOUND, String::from("Not found")))
 }
 
 #[debug_handler]

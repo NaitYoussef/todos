@@ -25,17 +25,29 @@ pub struct Todo {
 
 impl Todo {
     pub fn new(id: i32, title: String, status: Status) -> Todo {
-        Todo {
-            id,
-            title,
-            status,
+        Todo { id, title, status }
+    }
+
+    pub fn cancel(&mut self) -> bool {
+        if self.status != Status::Pending {
+            return false;
         }
+        self.status = Status::Cancelled;
+        true
     }
 }
 
-#[derive(Display, EnumString)]
+#[derive(Display, EnumString, PartialEq)]
 pub enum Status {
     Active,
     Pending,
     Cancelled,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn name() {
+        let mut todo = Todo::new(1, String::from("TOTO"), Status::Pending);
+    }
 }

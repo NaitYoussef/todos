@@ -1,5 +1,5 @@
 use crate::model::{Status, Todo, User};
-use crate::Data;
+use crate::resource::TodoResourceV1;
 use axum::body::Bytes;
 use chrono::{DateTime, Utc};
 use futures::{FutureExt, StreamExt, TryStreamExt};
@@ -7,7 +7,7 @@ use serde::Serialize;
 use sqlx::{query, query_as, FromRow, Pool, Postgres};
 use std::str::FromStr;
 use tokio_stream::Stream;
-use crate::resource::TodoResourceV1;
+use tracing::info;
 
 // TodoDao logic
 #[derive(Serialize, FromRow)]
@@ -20,15 +20,29 @@ pub struct TodoDao {
 }
 
 impl TodoDao {
-
     pub async fn load(pool: &Pool<Postgres>) -> Vec<Todo> {
-        query_as!(TodoDao, r#"SELECT id, status, title, user_id, created_at FROM todos"#)
-            .fetch_all(pool)
+        query_as!(
+            TodoDao,
+            r#"SELECT id, status, title, user_id, created_at FROM todos"#
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|todoDao| todoDao.todo())
+        .collect()
+    }
+
+    pub async fn load_by_id(pool: &Pool<Postgres>, id: i32) -> Option<Todo>{
+        query_as!(
+            TodoDao,
+            r#"SELECT id, status, title, user_id, created_at FROM todos WHERE id=$1"#,
+            id
+        )
+            .fetch_one(pool)
             .await
-            .unwrap()
-            .iter()
+            .ok()
             .map(|todoDao| todoDao.todo())
-            .collect()
     }
 
     fn todo(&self) -> Todo {
@@ -37,7 +51,11 @@ impl TodoDao {
         Todo::new(self.id, self.title.clone(), status)
     }
 
-    pub async fn insert_new_todo(pool: &Pool<Postgres>, title: String, user_id: i32) -> Result<(), String> {
+    pub async fn insert_new_todo(
+        pool: &Pool<Postgres>,
+        title: String,
+        user_id: i32,
+    ) -> Result<(), String> {
         let _ = query_as!(
             TodoDao,
             r#"INSERT INTO todos (status, title, user_id, created_at) VALUES ($1, 'PENDING', $2, $3)"#,
@@ -52,13 +70,24 @@ impl TodoDao {
         Ok(())
     }
 
+    pub async fn cancel(id: i32, pool: &Pool<Postgres>) -> Result<(), String> {
+        query!(r#"UPDATE todos SET status=$1 WHERE id=$2"#, Status::Cancelled.to_string(), id)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())
+            .map(|res| info!("Updated : {}", res.rows_affected()))
+    }
+
     pub async fn load_stream<'a>(
         pool: &'a Pool<Postgres>,
     ) -> impl Stream<Item = Result<Todo, String>> + use<'a> {
-        query_as!(TodoDao, r#"SELECT id, status, title, user_id, created_at FROM todos order by id"#)
-            .fetch(pool)
-            .map(|res| res.map(|todoDao| todoDao.todo()))
-            .map_err(|e| e.to_string())
+        query_as!(
+            TodoDao,
+            r#"SELECT id, status, title, user_id, created_at FROM todos order by id"#
+        )
+        .fetch(pool)
+        .map(|res| res.map(|todoDao| todoDao.todo()))
+        .map_err(|e| e.to_string())
     }
 }
 
@@ -92,11 +121,15 @@ pub struct UserDao {
 
 impl UserDao {
     pub async fn fetch(pool: &Pool<Postgres>, login: &String) -> Option<User> {
-        query_as!(UserDao, r#"SELECT id, login, password FROM users WHERE login = $1"#, login)
-            .fetch_one(pool)
-            .await
-            .map(|u| User::new(u.id, u.login, u.password))
-            .ok()
+        query_as!(
+            UserDao,
+            r#"SELECT id, login, password FROM users WHERE login = $1"#,
+            login
+        )
+        .fetch_one(pool)
+        .await
+        .map(|u| User::new(u.id, u.login, u.password))
+        .ok()
     }
 }
 
