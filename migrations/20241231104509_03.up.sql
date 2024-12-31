@@ -1,0 +1,4 @@
+-- Add up migration script here
+ALTER TABLE todos ADD COLUMN user_id INTEGER NOT NULL;
+ALTER TABLE todos ADD CONSTRAINT user_fk FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE todos ADD COLUMN created_at TIMESTAMP WITH TIME ZONE NOT NULL;
