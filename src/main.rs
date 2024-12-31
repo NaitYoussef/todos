@@ -1,6 +1,10 @@
 mod model;
+mod repository;
+mod resource;
 
-use crate::model::{convert, Todo, User};
+use crate::model::{Todo, User};
+use crate::repository::{convert, TodoDao, UserDao};
+use crate::resource::TodoResourceV1;
 use axum::body::Bytes;
 use axum::extract::{Request, State};
 use axum::http::{header, StatusCode};
@@ -10,6 +14,8 @@ use axum::routing::{get, post};
 use axum::{debug_handler, middleware, Json, Router};
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
+use dotenv::dotenv;
+use futures::future::err;
 use futures::StreamExt;
 use http_body_util::StreamBody;
 use hyper::body::Frame;
@@ -18,13 +24,12 @@ use serde::Deserialize;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
 use std::convert::Infallible;
+use std::env;
 use tokio::sync::mpsc;
 use tokio::task_local;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::info;
+use tracing::{error, info};
 use tracing_subscriber::fmt::format::FmtSpan;
-use std::env;
-use dotenv::dotenv;
 
 type Data = Result<Frame<Bytes>, Infallible>;
 type ResponseBody = StreamBody<ReceiverStream<Data>>;
@@ -51,7 +56,6 @@ async fn main() {
         .init();
 
     dotenv().ok(); // This line loads the environment variables from the ".env" file.
-
 
     let database_url = env::var("DATABASE_URL").unwrap();
     let pool = PgPoolOptions::new()
@@ -87,25 +91,29 @@ async fn create_todos(
     State(state): State<AppState>,
     Json(todo_request): Json<TodoRequest>,
 ) -> Result<StatusCode, StatusCode> {
+    let user = USER.get();
     info!(
         message = "creating todo",
         title = todo_request.title,
-        user = "moi"
+        user = user.login
     );
-    let _ = Todo::insert_new_todo(&state.pool, todo_request.title)
+    let _ = TodoDao::insert_new_todo(&state.pool, todo_request.title, user.id)
         .await
-        .map_err(|e| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            error!("Error caught {:?}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        })?;
     Ok(StatusCode::CREATED)
 }
 
 #[debug_handler]
-async fn fetch(State(state): State<AppState>) -> Json<Vec<Todo>> {
-    println!("je suis {}", USER.get());
-    Json(Todo::load(&state.pool).await)
+async fn fetch(State(state): State<AppState>) -> Json<Vec<TodoResourceV1>> {
+    println!("je suis {}", USER.get().login);
+    Json(TodoDao::load(&state.pool).await.into_iter().map(|todo| TodoResourceV1::from(todo)).collect())
 }
 
 task_local! {
-    pub static USER: String;
+    pub static USER: User;
 }
 
 async fn auth(
@@ -125,7 +133,7 @@ async fn auth(
         Err(StatusCode::UNAUTHORIZED)
     }
 }
-async fn authorize_current_user(pool: &Pool<Postgres>, auth_token: &str) -> Option<String> {
+async fn authorize_current_user(pool: &Pool<Postgres>, auth_token: &str) -> Option<User> {
     let vec = auth_token.split("Basic ").collect::<Vec<_>>();
     println!("{}", auth_token);
     println!("{}", vec.len());
@@ -141,10 +149,9 @@ async fn authorize_current_user(pool: &Pool<Postgres>, auth_token: &str) -> Opti
         let password = tokens.get(1).unwrap().clone();
         println!("login: {}", login);
         println!("password: {}", password);
-        return User::fetch(pool, &login)
+        return UserDao::fetch(pool, &login)
             .await
             .filter(|u| u.password == password)
-            .map(|u| u.login);
     }
 
     println!("Ops {}", auth_token);
@@ -158,7 +165,9 @@ async fn fetch_stream(State(state): State<AppState>) -> Result<Response<Response
     // some async task
     tokio::spawn(async move {
         // some expensive operations
-        let mut stream = Todo::load_stream(&state.pool).await;
+        let mut stream = TodoDao::load_stream(&state.pool)
+            .await
+            .map(|res| res.map(|todo| TodoResourceV1::from(todo)));
         let mut i = 0;
         let mut vec = Vec::with_capacity(100);
 
