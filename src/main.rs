@@ -1,10 +1,11 @@
 mod model;
 mod repository;
 mod resource;
+mod middlewares;
 
 use crate::model::{Todo, User};
 use crate::repository::{convert, TodoDao, UserDao};
-use crate::resource::{ProblemDetail, TodoResourceV1};
+use crate::resource::{create_todos, delete_todo, fetch, fetch_stream, ProblemDetail, TodoResourceV1};
 use axum::body::Bytes;
 use axum::extract::{Path, Request, State};
 use axum::http::{header, StatusCode};
@@ -33,6 +34,7 @@ use tokio::time::sleep_until;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
 use tracing_subscriber::fmt::format::FmtSpan;
+use crate::middlewares::auth;
 
 type Data = Result<Frame<Bytes>, Infallible>;
 type ResponseBody = StreamBody<ReceiverStream<Data>>;
@@ -93,154 +95,8 @@ async fn main() {
         .unwrap()
 }
 
-async fn create_todos(
-    State(state): State<AppState>,
-    Json(todo_request): Json<TodoRequest>,
-) -> Result<StatusCode, ProblemDetail> {
-    let user = USER.get();
-    info!(
-        message = "creating todo",
-        title = todo_request.title,
-        user = user.login
-    );
-    let _ = TodoDao::insert_new_todo(&state.pool, todo_request.title, user.id)
-        .await
-        .map_err(|e| {
-            error!("Error caught {:?}", e);
-            ProblemDetail::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
-    Ok(StatusCode::CREATED)
-}
-
-#[debug_handler]
-async fn fetch(State(state): State<AppState>) -> Json<Vec<TodoResourceV1>> {
-    println!("je suis {}", USER.get().login);
-    tokio::time::sleep(Duration::from_secs(25)).await;
-    Json(
-        TodoDao::load(&state.pool)
-            .await
-            .into_iter()
-            .map(|todo| TodoResourceV1::from(todo))
-            .collect(),
-    )
-}
-
 task_local! {
     pub static USER: User;
-}
-
-async fn auth(
-    State(state): State<AppState>,
-    req: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    let auth_header = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|header| header.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-    if let Some(current_user) = authorize_current_user(&state.pool, auth_header).await {
-        // State is setup here in the middleware
-        Ok(USER.scope(current_user, next.run(req)).await)
-    } else {
-        Err(StatusCode::UNAUTHORIZED)
-    }
-}
-async fn authorize_current_user(pool: &Pool<Postgres>, auth_token: &str) -> Option<User> {
-    let vec = auth_token.split("Basic ").collect::<Vec<_>>();
-    println!("{}", auth_token);
-    println!("{}", vec.len());
-    let token = vec.get(1).unwrap();
-    println!("{}", token);
-    if let Ok(decoded) = BASE64_STANDARD.decode(token) {
-        let result = String::from_utf8(decoded).unwrap();
-        let tokens = result
-            .split(':')
-            .map(|user| user.to_string())
-            .collect::<Vec<String>>();
-        let login = tokens.get(0).unwrap().clone();
-        let password = tokens.get(1).unwrap().clone();
-        println!("login: {}", login);
-        println!("password: {}", password);
-        return UserDao::fetch(pool, &login)
-            .await
-            .filter(|u| u.password == password);
-    }
-
-    println!("Ops {}", auth_token);
-    None
-}
-
-async fn delete_todo(
-    State(state): State<AppState>,
-    Path(id): Path<i32>,
-) -> Result<(), ProblemDetail> {
-    let optionalTodo = TodoDao::load_by_id(&state.pool, id).await;
-    if let Some(mut todo) = optionalTodo {
-        if !todo.cancel() {
-            return Err(ProblemDetail::new(
-                StatusCode::BAD_REQUEST,
-                String::from("only pending todos can be cancelled"),
-            ));
-        }
-        TodoDao::cancel(todo.id, &state.pool).await;
-        return Ok(());
-    }
-    Err(ProblemDetail::new(
-        StatusCode::NOT_FOUND,
-        String::from("Not found"),
-    ))
-}
-
-#[debug_handler]
-async fn fetch_stream(State(state): State<AppState>) -> Result<Response<ResponseBody>, Infallible> {
-    let (tx, rx) = mpsc::channel::<Data>(2000);
-
-    // some async task
-    tokio::spawn(async move {
-        // some expensive operations
-        let mut stream = TodoDao::load_stream(&state.pool)
-            .await
-            .map(|res| res.map(|todo| TodoResourceV1::from(todo)));
-        let mut i = 0;
-        let mut vec = Vec::with_capacity(100);
-
-        while let Some(message) = stream.next().await {
-            let x = message.unwrap();
-            vec.push(x);
-
-            i = i + 1;
-            if i % 100 == 0 {
-                match tx.send(Ok(Frame::data(convert(&vec)))).await {
-                    Ok(_) => {}
-                    Err(err) => {
-                        eprintln!("{}", err);
-                        return Ok(());
-                    }
-                }
-                vec.clear();
-            }
-        }
-        println!("{}", i);
-        tx.send(Ok(Frame::data(convert(&vec)))).await;
-
-        // headers based off expensive operation
-        let mut headers = HeaderMap::new();
-        headers.append("content-type", "application/jsonlines2".parse().unwrap());
-        tx.send(Ok(Frame::trailers(headers))).await.unwrap();
-        Ok::<(), String>(())
-    });
-
-    let stream = ReceiverStream::new(rx);
-    let body = StreamBody::new(stream);
-
-    println!("fin");
-
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header("content-type", "application/jsonlines") // trailers must be declared
-        .body(body)
-        .unwrap())
 }
 
 async fn shutdown_signal() {
