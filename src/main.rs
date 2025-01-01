@@ -77,7 +77,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(fetch))
         .route("/todos", get(fetch_stream))
-        .route("/todos/:id", delete(delete_todo))
+        .route("/todos/{id}", delete(delete_todo))
         .route("/todos", post(create_todos))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth))
         .with_state(state);
