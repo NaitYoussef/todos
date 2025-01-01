@@ -28,8 +28,8 @@ impl TodoDao {
         .fetch_all(pool)
         .await
         .unwrap()
-        .iter()
-        .map(|todoDao| todoDao.todo())
+        .into_iter()
+        .map(|todo_dao| Todo::from(todo_dao))
         .collect()
     }
 
@@ -42,13 +42,7 @@ impl TodoDao {
         .fetch_one(pool)
         .await
         .ok()
-        .map(|todoDao| todoDao.todo())
-    }
-
-    fn todo(&self) -> Todo {
-        let s = self.status.as_str();
-        let status = Status::from_str(s).unwrap();
-        Todo::new(self.id, self.title.clone(), status)
+        .map(|todo_dao| Todo::from(todo_dao))
     }
 
     pub async fn insert_new_todo(
@@ -58,7 +52,7 @@ impl TodoDao {
     ) -> Result<(), String> {
         let _ = query_as!(
             TodoDao,
-            r#"INSERT INTO todos (status, title, user_id, created_at) VALUES ($1, 'PENDING', $2, $3)"#,
+            r#"INSERT INTO todos (status, title, user_id, created_at) VALUES ('Pending', $1, $2, $3)"#,
             title,
             user_id,
             Utc::now()
@@ -90,8 +84,16 @@ impl TodoDao {
             r#"SELECT id, status, title, user_id, created_at FROM todos order by id"#
         )
         .fetch(pool)
-        .map(|res| res.map(|todoDao| todoDao.todo()))
+        .map(|res| res.map(|todo_dao| Todo::from(todo_dao)))
         .map_err(|e| e.to_string())
+    }
+}
+
+impl From<TodoDao> for Todo {
+    fn from(value: TodoDao) -> Self {
+        let s = value.status.as_str();
+        let status = Status::from_str(s).unwrap();
+        Todo::new(value.id, value.title.clone(), status)
     }
 }
 
