@@ -50,6 +50,7 @@ mod tests {
 
     #[tokio::test]
     async fn should_cancel_when_state_exists_and_is_pending() {
+        // Given
         let mut mock = MockTodoPort::new();
         mock.expect_load_by_id()
             .with(predicate::eq(1))
@@ -59,30 +60,40 @@ mod tests {
             .with(predicate::eq(1))
             .returning(|_id| Ok(()));
 
+        // When
         let todo = cancel_todo(&mock, 1, 1).await;
-        dbg!(&todo);
+
+        // Then
         assert_eq!(Ok(()), todo)
     }
 
     #[tokio::test]
     async fn should_return_not_found_where_todo_not_exist() {
+        // Given
         let mut mock = MockTodoPort::new();
         mock.expect_load_by_id()
             .with(predicate::eq(1))
             .returning(|_id| None);
 
+        // When
         let todo = cancel_todo(&mock, 1, 1).await;
+
+        // Then
         assert_eq!(Err(NotFound), todo)
     }
 
     #[tokio::test]
     async fn should_return_already_cancel_where_todo_is_cancel() {
+        // Given
         let mut mock = MockTodoPort::new();
         mock.expect_load_by_id()
             .with(predicate::eq(1))
             .returning(|id| Some(Todo::new(id, "".to_string(), Status::Cancelled)));
 
+        // When
         let todo = cancel_todo(&mock, 1, 1).await;
+
+        // Then
         assert_eq!(Err(AlreadyCancel), todo)
     }
 }
