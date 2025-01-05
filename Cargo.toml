@@ -20,3 +20,6 @@ base64 = {version =  "0.22.1", features = ["default"] }
 dotenv = "0.15.0"
 strum = "0.26.3"
 strum_macros = "0.26.3"
+
+[dev-dependencies]
+mockall = "0.13.1"

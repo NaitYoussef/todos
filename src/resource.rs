@@ -1,19 +1,21 @@
 use crate::model::Todo;
-use crate::repository::{convert, TodoDao};
+use crate::model::TodoPort;
+use crate::repository::{convert, TodoAdapter};
+use crate::usecase::{cancel_todo, create_todo, TodoError};
 use crate::{AppState, Data, ResponseBody, TodoRequest, USER};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{debug_handler, Json};
+use futures::StreamExt;
 use http_body_util::StreamBody;
 use hyper::body::Frame;
 use serde::{Serialize, Serializer};
 use std::convert::Infallible;
-use std::time::Duration;
+use std::ops::Deref;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
-use futures::{FutureExt, StreamExt};
 
 #[derive(Serialize)]
 pub struct TodoResourceV1 {
@@ -25,9 +27,9 @@ pub struct TodoResourceV1 {
 impl TodoResourceV1 {
     pub fn from(todo: Todo) -> Self {
         TodoResourceV1 {
-            id: todo.id,
-            title: todo.title,
-            status: todo.status.to_string(),
+            id: todo.id(),
+            title: todo.title().to_string(),
+            status: todo.status().to_string(),
         }
     }
 }
@@ -64,10 +66,9 @@ where
 
 #[debug_handler]
 pub async fn fetch(State(state): State<AppState>) -> Json<Vec<TodoResourceV1>> {
-    println!("je suis {}", USER.get().login);
-    tokio::time::sleep(Duration::from_secs(25)).await;
+    println!("Iam {}", USER.get().login);
     Json(
-        TodoDao::load(&state.pool)
+        TodoAdapter::load(&state.pool)
             .await
             .into_iter()
             .map(|todo| TodoResourceV1::from(todo))
@@ -76,13 +77,17 @@ pub async fn fetch(State(state): State<AppState>) -> Json<Vec<TodoResourceV1>> {
 }
 
 #[debug_handler]
-pub async fn fetch_stream(State(state): State<AppState>) -> Result<Response<ResponseBody>, Infallible> {
+pub async fn fetch_stream(
+    State(state): State<AppState>,
+) -> Result<Response<ResponseBody>, Infallible> {
     let (tx, rx) = mpsc::channel::<Data>(2000);
 
     // some async task
     tokio::spawn(async move {
         // some expensive operations
-        let mut stream = TodoDao::load_stream(&state.pool)
+        let mut stream = state
+            .todo_adapter
+            .load_stream()
             .await
             .map(|res| res.map(|todo| TodoResourceV1::from(todo)));
         let mut i = 0;
@@ -105,7 +110,7 @@ pub async fn fetch_stream(State(state): State<AppState>) -> Result<Response<Resp
             }
         }
         println!("{}", i);
-        tx.send(Ok(Frame::data(convert(&vec)))).await;
+        let _ = tx.send(Ok(Frame::data(convert(&vec)))).await;
 
         // headers based off expensive operation
         let mut headers = HeaderMap::new();
@@ -137,12 +142,14 @@ pub async fn create_todos(
         title = todo_request.title,
         user = user.login
     );
-    let _ = TodoDao::insert_new_todo(&state.pool, todo_request.title, user.id)
+    let arc = state.todo_adapter.deref();
+    create_todo(arc, todo_request.title, user.id)
         .await
         .map_err(|e| {
             error!("Error caught {:?}", e);
             ProblemDetail::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         })?;
+
     Ok(StatusCode::CREATED)
 }
 
@@ -151,25 +158,20 @@ pub async fn delete_todo(
     State(state): State<AppState>,
     Path(id): Path<i32>,
 ) -> Result<(), ProblemDetail> {
-
-    if let Some(mut todo) = TodoDao::load_by_id(&state.pool, id).await {
-        if !todo.cancel() {
-            return Err(ProblemDetail::new(
+    cancel_todo(state.todo_adapter.deref(), id, USER.get().id)
+        .await
+        .map_err(|err| match err {
+            TodoError::AlreadyCancel => ProblemDetail::new(
                 StatusCode::BAD_REQUEST,
                 String::from("only pending todos can be cancelled"),
-            ));
-        }
-        TodoDao::cancel(todo.id, &state.pool)
-            .await
-            .map_err(|err| ProblemDetail::new(
+            ),
+            TodoError::NotFound => ProblemDetail::new(
+                StatusCode::NOT_FOUND,
+                String::from("Not found"),
+            ),
+            TodoError::DatabaseError => ProblemDetail::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 String::from("problem when persisting data"),
-            ))
-    } else {
-        Err(ProblemDetail::new(
-            StatusCode::NOT_FOUND,
-            String::from("Not found"),
-        ))
-    }
+            ),
+        })
 }
-

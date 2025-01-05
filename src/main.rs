@@ -1,40 +1,29 @@
+mod middlewares;
 mod model;
 mod repository;
 mod resource;
-mod middlewares;
+mod usecase;
 
-use crate::model::{Todo, User};
-use crate::repository::{convert, TodoDao, UserDao};
-use crate::resource::{create_todos, delete_todo, fetch, fetch_stream, ProblemDetail, TodoResourceV1};
+use crate::middlewares::auth;
+use crate::model::User;
+use crate::repository::TodoAdapter;
+use crate::resource::{create_todos, delete_todo, fetch, fetch_stream};
 use axum::body::Bytes;
-use axum::extract::{Path, Request, State};
-use axum::http::{header, StatusCode};
-use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
-use axum::{debug_handler, middleware, Json, Router};
-use base64::prelude::BASE64_STANDARD;
-use base64::Engine;
+use axum::{middleware, Router};
 use dotenv::dotenv;
-use futures::future::err;
-use futures::{FutureExt, StreamExt};
 use http_body_util::StreamBody;
 use hyper::body::Frame;
-use hyper::HeaderMap;
 use serde::Deserialize;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
 use std::convert::Infallible;
 use std::env;
-use std::thread::sleep;
-use std::time::Duration;
-use tokio::sync::mpsc;
+use std::sync::Arc;
 use tokio::{signal, task_local};
-use tokio::time::sleep_until;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{error, info};
+use tracing::info;
 use tracing_subscriber::fmt::format::FmtSpan;
-use crate::middlewares::auth;
 
 type Data = Result<Frame<Bytes>, Infallible>;
 type ResponseBody = StreamBody<ReceiverStream<Data>>;
@@ -42,6 +31,7 @@ type ResponseBody = StreamBody<ReceiverStream<Data>>;
 #[derive(Clone)]
 struct AppState {
     pool: Pool<Postgres>,
+    todo_adapter: Arc<TodoAdapter>,
 }
 
 #[derive(Deserialize)]
@@ -70,10 +60,13 @@ async fn main() {
         .await
         .unwrap();
 
-    let result = sqlx::migrate!().run(&pool).await;
+    let _result = sqlx::migrate!().run(&pool).await;
 
     // build our application with a route
-    let state = AppState { pool };
+    let state = AppState {
+        pool: pool.clone(),
+        todo_adapter: Arc::new(TodoAdapter::new(pool)),
+    };
     let app = Router::new()
         .route("/", get(fetch))
         .route("/todos", get(fetch_stream))
@@ -103,14 +96,6 @@ async fn shutdown_signal() {
         signal::ctrl_c()
             .await
             .expect("failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
     };
 
     tokio::select! {_ = ctrl_c => {println!("received ctrl + C")}}
