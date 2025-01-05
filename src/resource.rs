@@ -1,8 +1,9 @@
 use crate::model::Todo;
 use crate::model::TodoPort;
-use crate::repository::{convert, TodoAdapter};
+use crate::repository::TodoAdapter;
 use crate::usecase::{cancel_todo, create_todo, TodoError};
 use crate::{AppState, Data, ResponseBody, TodoRequest, USER};
+use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -71,7 +72,7 @@ pub async fn fetch(State(state): State<AppState>) -> Json<Vec<TodoResourceV1>> {
         TodoAdapter::load(&state.pool)
             .await
             .into_iter()
-            .map(|todo| TodoResourceV1::from(todo))
+            .map(TodoResourceV1::from)
             .collect(),
     )
 }
@@ -89,7 +90,7 @@ pub async fn fetch_stream(
             .todo_adapter
             .load_stream()
             .await
-            .map(|res| res.map(|todo| TodoResourceV1::from(todo)));
+            .map(|res| res.map(TodoResourceV1::from));
         let mut i = 0;
         let mut vec = Vec::with_capacity(100);
 
@@ -97,7 +98,7 @@ pub async fn fetch_stream(
             let x = message.unwrap();
             vec.push(x);
 
-            i = i + 1;
+            i += 1;
             if i % 100 == 0 {
                 match tx.send(Ok(Frame::data(convert(&vec)))).await {
                     Ok(_) => {}
@@ -130,6 +131,18 @@ pub async fn fetch_stream(
         .body(body)
         .unwrap())
 }
+
+pub fn convert(value: &Vec<TodoResourceV1>) -> Bytes {
+    let mut result = Vec::new();
+    for todo in value {
+        let mut string = serde_json::to_vec(&todo).unwrap();
+        result.append(&mut string);
+        let mut vec = "\n".to_string().into_bytes();
+        result.append(&mut vec);
+    }
+    result.into()
+}
+
 
 #[debug_handler]
 pub async fn create_todos(

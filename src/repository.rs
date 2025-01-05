@@ -1,11 +1,8 @@
-use std::error::Error;
 use crate::model::{Status, Todo, TodoPort, User};
-use crate::resource::TodoResourceV1;
-use axum::body::Bytes;
 use chrono::{DateTime, Utc};
 use futures::{StreamExt, TryStreamExt};
-use serde::Serialize;
 use sqlx::{query, query_as, FromRow, Pool, Postgres};
+use std::error::Error;
 use std::str::FromStr;
 use tokio_stream::Stream;
 use tracing::info;
@@ -14,7 +11,7 @@ use tracing::info;
 pub struct TodoAdapter {
     pool: Pool<Postgres>,
 }
-#[derive(Serialize, FromRow)]
+#[derive(FromRow)]
 pub struct TodoModel {
     id: i32,
     title: String,
@@ -24,7 +21,7 @@ pub struct TodoModel {
 }
 
 impl TodoPort for TodoAdapter {
-    async fn load_by_id(&self,  id: i32) -> Option<Todo> {
+    async fn load_by_id(&self, id: i32) -> Option<Todo> {
         query_as!(
             TodoModel,
             r#"SELECT id, status, title, user_id, created_at FROM todos WHERE id=$1"#,
@@ -33,13 +30,10 @@ impl TodoPort for TodoAdapter {
         .fetch_one(&self.pool)
         .await
         .ok()
-        .map(|todo_model| Todo::from(todo_model))
+        .map(Todo::from)
     }
 
-    async fn insert_new_todo(&self,
-        title: String,
-        user_id: i32,
-    ) -> Result<Todo, Box<dyn Error>> {
+    async fn insert_new_todo(&self, title: String, user_id: i32) -> Result<Todo, Box<dyn Error>> {
         let result = query!(
             r#"INSERT INTO todos (status, title, user_id, created_at) VALUES ('Pending', $1, $2, $3) RETURNING ID"#,
             title,
@@ -63,19 +57,18 @@ impl TodoPort for TodoAdapter {
         .map(|res| info!("Updated : {}", res.rows_affected()))
     }
 
-    async fn load_stream<'a>(&'a self) -> impl Stream<Item = Result<Todo, String>> + 'a {
+    async fn load_stream(& self) -> impl Stream<Item = Result<Todo, String>> {
         query_as!(
             TodoModel,
             r#"SELECT id, status, title, user_id, created_at FROM todos order by id"#
         )
         .fetch(&self.pool)
-        .map(|res| res.map(|todo_dao| Todo::from(todo_dao)))
+        .map(|res| res.map(Todo::from))
         .map_err(|e| e.to_string())
     }
 }
 
 impl TodoAdapter {
-
     pub fn new(pool: Pool<Postgres>) -> Self {
         Self { pool }
     }
@@ -88,37 +81,17 @@ impl TodoAdapter {
         .await
         .unwrap()
         .into_iter()
-        .map(|todo_dao| Todo::from(todo_dao))
+        .map(Todo::from)
         .collect()
     }
 }
 
 impl From<TodoModel> for Todo {
-    fn from(value: TodoModel) -> Self {
-        let s = value.status.as_str();
+    fn from(todo_model: TodoModel) -> Self {
+        let s = todo_model.status.as_str();
         let status = Status::from_str(s).unwrap();
-        Todo::new(value.id, value.title.clone(), status)
+        Todo::new(todo_model.id, todo_model.title.clone(), status)
     }
-}
-
-impl From<TodoModel> for Bytes {
-    fn from(value: TodoModel) -> Self {
-        let mut string = serde_json::to_vec(&value).unwrap();
-        let mut vec = "\n".to_string().into_bytes();
-        string.append(&mut vec);
-        string.into()
-    }
-}
-
-pub fn convert(value: &Vec<TodoResourceV1>) -> Bytes {
-    let mut result = Vec::new();
-    for todo in value {
-        let mut string = serde_json::to_vec(&todo).unwrap();
-        result.append(&mut string);
-        let mut vec = "\n".to_string().into_bytes();
-        result.append(&mut vec);
-    }
-    result.into()
 }
 
 // UserDao logic

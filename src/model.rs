@@ -65,9 +65,9 @@ pub trait TodoPort {
 
     async fn cancel(&self, id: i32) -> Result<(), String>;
 
-    async fn load_stream<'a>(
-        &'a self,
-    ) -> impl Stream<Item = Result<Todo, String>> + 'a;
+    async fn load_stream(
+        &self,
+    ) -> impl Stream<Item = Result<Todo, String>>;
 }
 
 #[derive(Display, EnumString, PartialEq)]

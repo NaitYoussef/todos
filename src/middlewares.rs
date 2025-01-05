@@ -38,7 +38,7 @@ async fn authorize_current_user(pool: &Pool<Postgres>, auth_token: &str) -> Opti
             .split(':')
             .map(|user| user.to_string())
             .collect::<Vec<String>>();
-        let login = tokens.get(0).unwrap().clone();
+        let login = tokens.first().unwrap().clone();
         let password = tokens.get(1).unwrap().clone();
         println!("login: {}", login);
         println!("password: {}", password);

@@ -4,7 +4,6 @@ use futures::TryFutureExt;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-
 #[derive(Debug, PartialEq)]
 pub enum TodoError {
     AlreadyCancel,
@@ -16,7 +15,11 @@ impl Error for TodoError {}
 
 impl Display for TodoError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
+        match self {
+            AlreadyCancel => write!(f, "AlreadyCancel"),
+            NotFound => write!(f, "NotFound"),
+            DatabaseError => write!(f, "DatabaseError"),
+        }
     }
 }
 
@@ -41,9 +44,9 @@ pub async fn create_todo(
 
 #[cfg(test)]
 mod tests {
-    use mockall::predicate;
-    use crate::model::{MockTodoPort, Status};
     use super::*;
+    use crate::model::{MockTodoPort, Status};
+    use mockall::predicate;
 
     #[tokio::test]
     async fn should_cancel_when_state_exists_and_is_pending() {
@@ -82,5 +85,4 @@ mod tests {
         let todo = cancel_todo(&mock, 1, 1).await;
         assert_eq!(Err(AlreadyCancel), todo)
     }
-
 }
