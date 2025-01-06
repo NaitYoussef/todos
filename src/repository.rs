@@ -12,7 +12,7 @@ pub struct TodoAdapter {
     pool: Pool<Postgres>,
 }
 #[derive(FromRow)]
-pub struct TodoModel {
+pub struct TodoDao {
     id: i32,
     title: String,
     status: String,
@@ -23,7 +23,7 @@ pub struct TodoModel {
 impl TodoPort for TodoAdapter {
     async fn load_by_id(&self, id: i32) -> Option<Todo> {
         query_as!(
-            TodoModel,
+            TodoDao,
             r#"SELECT id, status, title, user_id, created_at FROM todos WHERE id=$1"#,
             id
         )
@@ -59,7 +59,7 @@ impl TodoPort for TodoAdapter {
 
     async fn load_stream(& self) -> impl Stream<Item = Result<Todo, String>> {
         query_as!(
-            TodoModel,
+            TodoDao,
             r#"SELECT id, status, title, user_id, created_at FROM todos order by id"#
         )
         .fetch(&self.pool)
@@ -74,7 +74,7 @@ impl TodoAdapter {
     }
     pub async fn load(pool: &Pool<Postgres>) -> Vec<Todo> {
         query_as!(
-            TodoModel,
+            TodoDao,
             r#"SELECT id, status, title, user_id, created_at FROM todos"#
         )
         .fetch_all(pool)
@@ -86,8 +86,8 @@ impl TodoAdapter {
     }
 }
 
-impl From<TodoModel> for Todo {
-    fn from(todo_model: TodoModel) -> Self {
+impl From<TodoDao> for Todo {
+    fn from(todo_model: TodoDao) -> Self {
         let s = todo_model.status.as_str();
         let status = Status::from_str(s).unwrap();
         Todo::new(todo_model.id, todo_model.title.clone(), status)

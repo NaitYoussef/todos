@@ -67,13 +67,7 @@ async fn main() {
         pool: pool.clone(),
         todo_adapter: Arc::new(TodoAdapter::new(pool)),
     };
-    let app = Router::new()
-        .route("/", get(fetch))
-        .route("/todos", get(fetch_stream))
-        .route("/todos/{id}", delete(delete_todo))
-        .route("/todos", post(create_todos))
-        .route_layer(middleware::from_fn_with_state(state.clone(), auth))
-        .with_state(state);
+    let app = router(state);
 
     // run it
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
@@ -85,6 +79,16 @@ async fn main() {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap()
+}
+
+fn router(state: AppState) -> Router {
+    Router::new()
+        .route("/", get(fetch))
+        .route("/todos", get(fetch_stream))
+        .route("/todos/{id}", delete(delete_todo))
+        .route("/todos", post(create_todos))
+        .route_layer(middleware::from_fn_with_state(state.clone(), auth))
+        .with_state(state)
 }
 
 task_local! {
@@ -100,14 +104,56 @@ async fn shutdown_signal() {
 
     tokio::select! {_ = ctrl_c => {println!("received ctrl + C")}}
 }
-/*#[debug_handler]
-async fn fetch_stream2(State(state): State<AppState>) -> Result<impl IntoResponse, Infallible> {
 
+#[cfg(test)]
+mod tests {
+    use crate::repository::TodoAdapter;
+    use crate::{router, AppState};
+    use axum::http::StatusCode;
+    use axum_test::TestServer;
+    use sqlx::postgres::PgPoolOptions;
+    use std::sync::Arc;
+    use testcontainers_modules::postgres;
+    use testcontainers_modules::testcontainers::runners::AsyncRunner;
 
-    let body = Sse::new(Todo::load_stream_static(&state.pool).await);
+    #[sqlx::test]
+    async fn api_test(){
+        // Set test
+        let container = postgres::Postgres::default().start().await.unwrap();
+        let host_port = container.get_host_port_ipv4(5432).await.unwrap();
 
-    println!("fin");
+        let database_url = &format!(
+            "postgres://postgres:postgres@127.0.0.1:{host_port}/postgres",
+        );
 
-    Ok(body)
+        let pool = PgPoolOptions::new()
+            .min_connections(5)
+            .max_connections(5)
+            .connect(&database_url)
+            .await
+            .unwrap();
+
+        // Prepare data
+        let _result = sqlx::migrate!().run(&pool).await;
+        sqlx::query!(r#"INSERT INTO users(login, password) values('youssef', '123456')"#)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let state = AppState {
+            pool: pool.clone(),
+            todo_adapter: Arc::new(TodoAdapter::new(pool)),
+        };
+        // Launch server
+        let server = TestServer::new(router(state)).unwrap();
+
+        // When
+        let response = server.get("/")
+            .authorization("Basic eW91c3NlZjoxMjM0NTY=")
+            .await;
+
+        // Then
+        assert_eq!(response.status_code(), StatusCode::OK);
+        assert_eq!(response.as_bytes(), "[]");
+    }
 }
-*/
