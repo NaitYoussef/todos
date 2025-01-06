@@ -132,18 +132,6 @@ pub async fn fetch_stream(
         .unwrap())
 }
 
-pub fn convert(value: &Vec<TodoResourceV1>) -> Bytes {
-    let mut result = Vec::new();
-    for todo in value {
-        let mut string = serde_json::to_vec(&todo).unwrap();
-        result.append(&mut string);
-        let mut vec = "\n".to_string().into_bytes();
-        result.append(&mut vec);
-    }
-    result.into()
-}
-
-
 #[debug_handler]
 pub async fn create_todos(
     State(state): State<AppState>,
@@ -155,8 +143,8 @@ pub async fn create_todos(
         title = todo_request.title,
         user = user.login
     );
-    let arc = state.todo_adapter.deref();
-    create_todo(arc, todo_request.title, user.id)
+    let todo_adapter = state.todo_adapter.deref();
+    create_todo(todo_adapter, todo_request.title, user.id)
         .await
         .map_err(|e| {
             error!("Error caught {:?}", e);
@@ -187,4 +175,15 @@ pub async fn delete_todo(
                 String::from("problem when persisting data"),
             ),
         })
+}
+
+fn convert(value: &Vec<TodoResourceV1>) -> Bytes {
+    let mut result = Vec::new();
+    for todo in value {
+        let mut string = serde_json::to_vec(&todo).unwrap();
+        result.append(&mut string);
+        let mut vec = "\n".to_string().into_bytes();
+        result.append(&mut vec);
+    }
+    result.into()
 }
