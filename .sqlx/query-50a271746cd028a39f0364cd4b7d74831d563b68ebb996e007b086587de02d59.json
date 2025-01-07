@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO users(login, password) values('youssef', '123456')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "50a271746cd028a39f0364cd4b7d74831d563b68ebb996e007b086587de02d59"
+}
